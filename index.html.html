@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Interactive Recipe and Data Visualization App</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: white;
+            font-family: 'Arial', sans-serif;
+        }
+    </style>
+</head>
+<body>
+    <script>
+        window.CrossScriptVars = {
+            location: '',
+            wakeTime: '',
+            ingredient_1: 0,
+            ingredient_2: 0,
+            tomatoAnswer: '',
+            tooManyCount: 0,
+            ingredient_1_string: '',
+            ingredient_2_string: ''
+        };
+
+        const WELCOME = 0;
+        const LOCATION_SELECT = 1;
+        const WAKE_TIME = 2;
+        const INGREDIENTS = 3;
+        const TOMATO_QUESTION = 4;
+        const FOOD_QUANTITY = 5;
+        const DONE_OPTIONS = 6;
+        const RECIPE_OUTPUT = 7;
+        const DATA_VIZ_OUTPUT = 8;
+
+        let gameState = WELCOME;
+
+        let userChoices = {
+            location: '',
+            wakeTime: '',
+            ingredients: [],
+            tomatoAnswer: '',
+            foodQuantity: 0,
+            weatherData: {}
+        };
+
+        let buttons = [];
+        let recipeDatabase = {};
+        let currentPoem = '';
+        let weatherFetched = false;
+
+        let vizStarted = false;
+
+        // Location coordinates for weather API
+        const locationCoords = {
+            'Bengaluru': { lat: 12.9716, lon: 77.5946 },
+            'Kolkata': { lat: 10.8231, lon: 106.6297 },
+            'Hyderabad': { lat: 63.4613, lon: 142.7858 },
+            'Delhi': { lat: 64.1466, lon: -21.9426 }
+        };
+
+        // Ingredient availability by location
+        const ingredientsByLocation = {
+            'Bengaluru': ['Apple', 'Orange', 'Mango', 'Banana', 'Grape', 'Strawberry', 'Lemon', 'Pear'],
+            'Kolkata': ['Apple', 'Mango', 'Banana', 'Grape', 'Strawberry', 'Lemon', 'Peach'],
+            'Hyderabad': ['Apple', 'Orange', 'Mango', 'Blueberry','Banana', 'Grape'],
+            'Delhi': ['Apple', 'Orange', 'Strawberry', 'Blueberry', 'Grape', 'Pear']
+        };
+
+        // Food questions by location
+        const foodQuestions = {
+            'Bengaluru': 'How fruity does Bengaluru feel today?',
+            'Kolkata': 'How sticky-sweet is the air today?',
+            'Hyderabad': 'How fruit-bitten are you feeling today?',
+            'Delhi': 'What is the fruit level in the land of ice ?'
+        };
+
+        const WEATHER_API_KEY = 'YOUR_API_KEY_HERE'; // Replace with your OpenWeatherMap API key
+
+        function setup() {
+            createCanvas(windowWidth, windowHeight);
+            loadRecipeDatabase();
+        }
+
+        function windowResized() {
+            resizeCanvas(windowWidth, windowHeight);
+        }
+
+        function loadRecipeDatabase() {
+            // Load from Google Sheets CSV
+            const csvUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRIjFPam4PRCF8bZz7_pKOittU3B24ljMyDDCJxdN30xjVw7hMueW4V3GcoiljyS_Mj9gw1d_dR-Swd/pub?gid=111001435&single=true&output=csv';
+
+            Papa.parse(csvUrl, {
+                download: true,
+                header: true,
+                skipEmptyLines: true,
+                complete: function (results) {
+                    console.log('Recipe database loaded:', results.data.length, 'recipes');
+
+                    results.data.forEach(row => {
+                        if (row.Ingredient1 && row.Ingredient2 && row.Poem) {
+                            const key1 = row.Ingredient1 + '-' + row.Ingredient2;
+                            const key2 = row.Ingredient2 + '-' + row.Ingredient1;
+                            const poem = row.Poem.replace(/\\n/g, '\n');
+
+                            recipeDatabase[key1] = poem;
+                            recipeDatabase[key2] = poem;
+                        }
+                    });
+
+                    console.log('Recipe combinations loaded:', Object.keys(recipeDatabase).length);
+                },
+                error: function (error) {
+                    console.warn('Failed to load recipe database:', error);
+                    // Fallback recipes
+                    recipeDatabase = {
+                        'Apple-Orange': 'Golden apple meets citrus bright,\nA morning blend of pure delight.\nSlice them thin and layer neat,\nA healthy, colorful morning treat!',
+                        'Orange-Apple': 'Golden apple meets citrus bright,\nA morning blend of pure delight.\nSlice them thin and layer neat,\nA healthy, colorful morning treat!'
+                    };
+                }
+            });
+        }
+
+        async function fetchWeatherData(location) {
+            if (WEATHER_API_KEY === 'YOUR_API_KEY_HERE') {
+                // Mock weather data
+                userChoices.weatherData = {
+                    temperature: Math.round(Math.random() * 30 + 10),
+                    cloudCover: Math.round(Math.random() * 100)
+                };
+                weatherFetched = true;
+                return;
+            }
+
+            try {
+                const coords = locationCoords[location];
+                const url = `https://api.openweathermap.org/data/2.5/weather?lat=${coords.lat}&lon=${coords.lon}&appid=${WEATHER_API_KEY}&units=metric`;
+
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (response.ok) {
+                    userChoices.weatherData = {
+                        temperature: Math.round(data.main.temp),
+                        cloudCover: data.clouds.all
+                    };
+                    console.log('Weather data fetched:', userChoices.weatherData);
+                } else {
+                    throw new Error('Weather API error');
+                }
+            } catch (error) {
+                console.warn('Weather fetch failed, using mock data:', error);
+                userChoices.weatherData = {
+                    temperature: Math.round(Math.random() * 30 + 10),
+                    cloudCover: Math.round(Math.random() * 100)
+                };
+            }
+
+            weatherFetched = true;
+        }
+
+        function draw() {
+            drawBackground();
+
+            switch (gameState) {
+                case WELCOME:
+                    drawWelcomeScreen();
+                    break;
+                case LOCATION_SELECT:
+                    drawLocationScreen();
+                    break;
+                case WAKE_TIME:
+                    drawWakeTimeScreen();
+                    break;
+                case INGREDIENTS:
+                    drawIngredientsScreen();
+                    break;
+                case TOMATO_QUESTION:
+                    drawTomatoScreen();
+                    break;
+                case FOOD_QUANTITY:
+                    drawFoodQuantityScreen();
+                    break;
+                case DONE_OPTIONS:
+                    drawDoneScreen();
+                    break;
+                case RECIPE_OUTPUT:
+                    drawRecipeScreen();
+                    break;
+                case DATA_VIZ_OUTPUT:
+                    drawDataVizScreen();
+                    break;
+            }
+        }
+
+        function drawBackground() {
+            background(255, 255, 255);
+        }
+
+        let myFont;
+let welcomeImg;
+        function preload() {
+            myFont = loadFont('Jersey25-Regular.ttf'); // Make sure the file is in your project directory
+            welcomeImg = loadImage('forkast-cover.png');
+        }
+
+       function drawWelcomeScreen() {
+    // Draw full-screen image
+    imageMode(CORNER);
+    image(welcomeImg, 0, 0, width, height);
+
+    // CTA button
+    let btnW = width * 0.28;
+    let btnH = height * 0.08;
+    let btnX = width / 2 - btnW / 2;
+    let btnY = height * 0.7;
+
+    noStroke();
+    fill(181, 216, 51); // green accent
+    rect(btnX, btnY, btnW, btnH, 14);
+
+    // Button text
+    fill(0);
+    textAlign(CENTER, CENTER);
+    textFont(myFont);
+    textSize(btnH * 0.45);
+    text('TAP TO START', btnX + btnW / 2, btnY + btnH / 2);
+        }
+
+        function drawLocationScreen() {
+            noStroke();
+
+            fill(0);
+            textAlign(CENTER , CENTER);
+            textSize(36);
+            textStyle(NORMAL);
+            text('Choose Your Location', width / 2, 100);
+
+            if (!weatherFetched && userChoices.location) {
+                textSize(16);
+                fill(100, 100, 100);
+                text('Fetching weather data...', width / 2, 150);
+            }
+
+            // Location buttons
+            const locations = ['Bengaluru', 'Kolkata', 'Hyderabad', 'Delhi'];
+            const buttonWidth = 200;
+            const buttonHeight = 80;
+            const startX = width / 2 - buttonWidth;
+            const startY = 200;
+
+            for (let i = 0; i < locations.length; i++) {
+                const x = startX + (i % 2) * (buttonWidth + 40);
+                const y = startY + Math.floor(i / 2) * (buttonHeight + 20);
+
+                const isSelected = userChoices.location === locations[i];
+                const buttonColor = isSelected ? color(245, 120, 145) : color(251, 179, 41); //location buttons orange to pink
+
+                drawButton(x, y, buttonWidth, buttonHeight, locations[i], buttonColor);
+            }
+
+            if (weatherFetched && userChoices.location) {
+                // Show weather data
+                fill(255, 255, 255, 200);
+                noStroke();
+
+                strokeWeight(1);
+                rect(width / 2 - 150, 450, 300, 100, 10);
+
+               
+
+                CrossScriptVars.location = userChoices.location;
+
+                drawButton(width / 2 - 60, 570, 120, 40, 'Continue', color(181, 216, 51));
+            }
+        }
+
+        function drawWakeTimeScreen() {
+            noStroke();
+
+            fill(0);
+            textAlign(CENTER, CENTER);
+            textSize(36);
+            textStyle(NORMAL);
+            text('When did you wake up today?', width / 2, 100);
+
+            const timeOptions = ['4AM - 7AM', '7AM - 10AM', '10AM - 1PM', '1PM - 4PM'];
+            const buttonSize = 150;
+            const spacing = 50;
+            const startX = width / 2 - (2 * buttonSize + spacing) / 2;
+            const startY = 200;
+
+            for (let i = 0; i < timeOptions.length; i++) {
+                const x = startX + (i % 2) * (buttonSize + spacing);
+                const y = startY + Math.floor(i / 2) * (buttonSize + spacing);
+
+                const isSelected = userChoices.wakeTime === timeOptions[i];
+                const buttonColor = isSelected ? color(245, 120, 145) : color(251, 179, 41);
+
+                drawSquareButton(x, y, buttonSize, timeOptions[i], buttonColor);
+            }
+
+            if (userChoices.wakeTime) {
+                CrossScriptVars.wakeTime = userChoices.wakeTime;
+                drawButton(width / 2 - 60, 550, 120, 40, 'Continue', color(181, 216, 51));
+            }
+        }
+
+        function drawIngredientsScreen() {
+            noStroke();
+
+            fill(0);
+            textAlign(CENTER, CENTER);
+            textSize(36);
+            textStyle(NORMAL);
+            text('Choose any 2 Ingredients', width / 2, 80);
+
+            textSize(18);
+            text(`Available in ${userChoices.location}:`, width / 2, 110);
+            text(`Selected: ${userChoices.ingredients.length}/2`, width / 2, 135);
+
+            const availableIngredients = ingredientsByLocation[userChoices.location];
+            const allIngredients = ['Apple', 'Orange', 'Mango', 'Banana', 'Grape', 'Strawberry', 'Blueberry', 'Lemon', 'Peach', 'Pear'];
+
+            const buttonSize = 90;
+            const cols = 5;
+            const startX = width / 2 - (cols * buttonSize + (cols - 1) * 10) / 2;
+            const startY = 170;
+
+            for (let i = 0; i < allIngredients.length; i++) {
+                const ingredient = allIngredients[i];
+                const x = startX + (i % cols) * (buttonSize + 10);
+                const y = startY + Math.floor(i / cols) * (buttonSize + 10);
+
+                const isAvailable = availableIngredients.includes(ingredient);
+                const isSelected = userChoices.ingredients.includes(ingredient);
+
+                let buttonColor;
+                if (!isAvailable) {
+                    buttonColor = color(222, 68, 71); // Red
+                } else if (isSelected) {
+                    buttonColor = color(245, 120, 145); // Selected: Pink
+                } else {
+                    buttonColor = color(181, 216, 51); // Available: Green
+                }
+
+                drawSquareButton(x, y, buttonSize, ingredient, buttonColor, isAvailable);
+            }
+
+            if (userChoices.ingredients.length === 2) {
+                CrossScriptVars.ingredient_1 = allIngredients.indexOf(userChoices.ingredients[0]);
+                CrossScriptVars.ingredient_2 = allIngredients.indexOf(userChoices.ingredients[1]);
+                CrossScriptVars.ingredient_1_string = userChoices.ingredients[0];
+                CrossScriptVars.ingredient_2_string = userChoices.ingredients[1];
+                drawButton(width / 2 - 60, 550, 120, 40, 'Continue', color(181, 216, 51));
+            }
+        }
+
+        function drawTomatoScreen() {
+            noStroke();
+
+            fill(0);
+            textAlign(CENTER, CENTER);
+            textSize(36);
+            textStyle(NORMAL);
+            text('Is Tomato A Fruit?', width / 2, 150);
+
+            const options = ['Yes, of course', 'Nooooo', 'Maybe???'];
+            const buttonWidth = 150;
+            const buttonHeight = 40;
+            const spacing = 90;
+            const startX = width / 2 - (buttonWidth + spacing / 2);
+            const startY = 250;
+
+            for (let i = 0; i < options.length; i++) {
+                const x = startX + (i % 2) * (buttonWidth + spacing);
+                const y = startY + Math.floor(i / 2) * (buttonHeight + spacing);
+
+                // Special positioning for the third button
+                if (i === 2) {
+                    drawSquareButton(width / 2 - buttonWidth / 2, y, buttonWidth, options[i],
+                        userChoices.tomatoAnswer === options[i] ? color(245, 120, 145) : color(251, 179, 41));
+                } else {
+                    drawSquareButton(x, y, buttonWidth, options[i],
+                        userChoices.tomatoAnswer === options[i] ? color(245, 120, 145) : color(251, 179, 41));
+                }
+            }
+
+            if (userChoices.tomatoAnswer) {
+                CrossScriptVars.tomatoAnswer = userChoices.tomatoAnswer;
+                drawButton(width / 2 - 60, 500, 120, 40, 'Continue', color(181, 216, 51));
+            }
+        }
+
+        function drawFoodQuantityScreen() {
+            noStroke();
+
+            fill(0);
+            textAlign(CENTER, CENTER);
+            textSize(32);
+            textStyle(NORMAL);
+            text(foodQuestions[userChoices.location], width / 2, 120);
+
+            const buttonSize = 70;
+            const cols = 5;
+            const startX = width / 2 - (cols * buttonSize + (cols - 1) * 15) / 2;
+            const startY = 200;
+
+            for (let i = 1; i <= 10; i++) {
+                const x = startX + ((i - 1) % cols) * (buttonSize + 15);
+                const y = startY + Math.floor((i - 1) / cols) * (buttonSize + 15);
+
+                const isSelected = userChoices.foodQuantity === i;
+                const buttonColor = isSelected ? color(245, 120, 145) : color(251, 179, 41);
+
+                drawSquareButton(x, y, buttonSize, i.toString(), buttonColor);
+            }
+
+            if (userChoices.foodQuantity > 0) {
+                CrossScriptVars.tooManyCount = userChoices.foodQuantity;
+                drawButton(width / 2 - 60, 450, 120, 40, 'Continue', color(181, 216, 51));
+            }
+        }
+
+        function drawDoneScreen() {
+            fill(0);
+            textAlign(CENTER, CENTER);
+            textSize(48);
+            textStyle(NORMAL);
+            text('Done!', width / 2, 200);
+
+            textSize(24);
+            textStyle(NORMAL);
+            text('Choose your output:', width / 2, 260);
+
+            // Two main option buttons
+            //drawButton(width / 2 - 140, 320, 120, 60, 'The Perfect\nRecipe', color(255, 150, 100));
+            drawButton(width / 2 - 60, 320, 120, 60, 'Your Day\nin Food!', color(100, 150, 255));
+        }
+
+        function drawRecipeScreen() {
+            fill(0);
+            textAlign(CENTER, CENTER);
+            textSize(48);
+            textStyle(NORMAL);
+            text('The Perfect Recipe', width / 2, 60);
+
+            // Recipe box
+            fill(255, 255, 255, 240);
+            stroke(255, 215, 0);
+            strokeWeight(3);
+            rect(100, 100, width - 200, 350, 15);
+
+            // Recipe content
+            fill(50, 50, 50);
+            textAlign(CENTER, CENTER);
+            textSize(48);
+            textStyle(NORMAL);
+            text(`${userChoices.ingredients[0]} & ${userChoices.ingredients[1]} Delight`, width / 2, 140);
+
+            textSize(48);
+            textStyle(NORMAL);
+            text(currentPoem, width / 2, 280);
+
+            // Weather influence note
+            textSize(12);
+            fill(100, 100, 100);
+            text(`Inspired by ${userChoices.weatherData.temperature}°C weather in ${userChoices.location}`, width / 2, 420);
+
+            // Buttons
+            drawButton(width / 2 - 180, 480, 100, 40, 'Your Day\nin Food', color(100, 150, 255));
+            drawButton(width / 2 - 50, 480, 100, 40, 'Print', color(150, 150, 150));
+            drawButton(width / 2 - 60, 540, 120, 40, 'Reset', color(200, 50, 50));
+        }
+
+        function drawDataVizScreen() {
+
+
+            if (vizStarted == false) {
+                console.log("its poothing time");
+                vizStarted = true;
+
+                src = "sketch.js"
+                const script = document.createElement('script');
+                script.src = src;
+                script.onload = () => console.log(`${src} loaded`);
+                document.head.appendChild(script);
+            }
+
+            //drawRecipeScreen();
+            /*
+
+              fill(0);
+              textAlign(CENTER, CENTER);
+              textSize(52);
+              textStyle(NORMAL);
+              text('Your Day in Food!', width/2, 60);
+
+              // Visualization frame (blank for now as requested)
+              fill(255, 255, 255, 240);
+              stroke(200, 200, 200);
+              strokeWeight(2);
+              rect(100, 100, width - 200, 350, 15);
+
+              fill(150, 150, 150);
+              textSize(52);
+              text('Data Visualization Coming Soon...', width/2, 280);
+
+              // Buttons
+              drawButton(width/2 - 180, 480, 100, 40, 'The Perfect\nRecipe', color(255, 150, 100));
+              drawButton(width/2 - 50, 480, 100, 40, 'Print', color(150, 150, 150));
+              drawButton(width/2 - 60, 540, 120, 40, 'Reset', color(200, 50, 50));
+            */
+        }
+
+        function drawButton(x, y, w, h, label, btnColor) {
+            // Button hover effect
+            const isHover = mouseX > x && mouseX < x + w && mouseY > y && mouseY < y + h;
+
+            if (isHover) {
+                fill(red(btnColor) + 30, green(btnColor) + 30, blue(btnColor) + 30);
+            } else {
+                fill(btnColor);
+            }
+
+            noStroke();
+            //stroke(0);
+            //strokeWeight(2);
+            rect(x, y, w, h, 8);
+
+            fill(255);
+            textAlign(CENTER, CENTER);
+            textSize(20);
+            textStyle(NORMAL);
+            text(label, x + w / 2, y + h / 2);
+        }
+
+        function drawSquareButton(x, y, size, label, btnColor, enabled = true) {
+            const isHover = mouseX > x && mouseX < x + size && mouseY > y && mouseY < y + size;
+
+            if (!enabled) {
+                fill(100, 100, 100);
+            } else if (isHover) {
+                fill(red(btnColor) + 30, green(btnColor) + 30, blue(btnColor) + 30);
+            } else {
+                fill(btnColor);
+            }
+
+            noStroke();
+            //stroke(0);
+            //strokeWeight(2);
+            rect(x, y, size, size - (size*0.2), 8);
+
+            fill(enabled ? 255 : 150);
+            textAlign(CENTER, CENTER);
+            textSize(16);
+            textStyle(NORMAL);
+            text(label, x + size / 2, y + (size*0.8) / 2);
+        }
+
+        function mousePressed() {
+            switch (gameState) {
+              case WELCOME:
+    let btnW = width * 0.28;
+    let btnH = height * 0.08;
+    let btnX = width / 2 - btnW / 2;
+    let btnY = height * 0.7;
+
+    if (
+        mouseX > btnX &&
+        mouseX < btnX + btnW &&
+        mouseY > btnY &&
+        mouseY < btnY + btnH
+    ) {
+        gameState = LOCATION_SELECT;
+    }
+    break;
+
+                case LOCATION_SELECT:
+                    const locations = ['Bengaluru', 'Kolkata', 'Hyderabad', 'Delhi'];
+                    for (let i = 0; i < locations.length; i++) {
+                        const x = width / 2 - 200 + (i % 2) * 240;
+                        const y = 200 + Math.floor(i / 2) * 100;
+
+                        if (mouseX > x && mouseX < x + 200 && mouseY > y && mouseY < y + 80) {
+                            userChoices.location = locations[i];
+                            weatherFetched = false;
+                            fetchWeatherData(locations[i]);
+                            break;
+                        }
+                    }
+
+                    // Continue button
+                    if (weatherFetched && userChoices.location &&
+                        mouseX > width / 2 - 60 && mouseX < width / 2 + 60 &&
+                        mouseY > 570 && mouseY < 610) {
+                        gameState = WAKE_TIME;
+                    }
+                    break;
+
+                case WAKE_TIME:
+                    const timeOptions = ['4AM - 7AM', '7AM - 10AM', '10AM - 1PM', '1PM - 4PM'];
+                    for (let i = 0; i < timeOptions.length; i++) {
+                        const x = width / 2 - 175 + (i % 2) * 200;
+                        const y = 200 + Math.floor(i / 2) * 200;
+
+                        if (mouseX > x && mouseX < x + 150 && mouseY > y && mouseY < y + 150) {
+                            userChoices.wakeTime = timeOptions[i];
+                            break;
+                        }
+                    }
+
+                    if (userChoices.wakeTime && mouseX > width / 2 - 60 && mouseX < width / 2 + 60 &&
+                        mouseY > 550 && mouseY < 590) {
+                        gameState = INGREDIENTS;
+                    }
+                    break;
+
+                case INGREDIENTS:
+                    const availableIngredients = ingredientsByLocation[userChoices.location];
+                    const allIngredients = ['Apple', 'Orange', 'Mango', 'Banana', 'Grape', 'Strawberry', 'Blueberry', 'Lemon', 'Peach', 'Pear'];
+
+                    for (let i = 0; i < allIngredients.length; i++) {
+                        const ingredient = allIngredients[i];
+                        const x = width / 2 - 225 + (i % 5) * 100;
+                        const y = 170 + Math.floor(i / 5) * 100;
+
+                        if (mouseX > x && mouseX < x + 90 && mouseY > y && mouseY < y + 90 &&
+                            availableIngredients.includes(ingredient)) {
+
+                            if (userChoices.ingredients.includes(ingredient)) {
+                                userChoices.ingredients = userChoices.ingredients.filter(ing => ing !== ingredient);
+                            } else if (userChoices.ingredients.length < 2) {
+                                userChoices.ingredients.push(ingredient);
+                            }
+                            break;
+                        }
+                    }
+
+                    if (userChoices.ingredients.length === 2 &&
+                        mouseX > width / 2 - 60 && mouseX < width / 2 + 60 &&
+                        mouseY > 550 && mouseY < 590) {
+                        gameState = TOMATO_QUESTION;
+                    }
+                    break;
+
+                case TOMATO_QUESTION:
+                    const tomatoOptions = ['Yes, of course', 'Nooooo', 'Maybe???'];
+                    for (let i = 0; i < tomatoOptions.length; i++) {
+                        let x, y;
+                        if (i === 2) {
+                            x = width / 2 - 75;
+                            y = 250 + 130;
+                        } else {
+                            x = width / 2 - 125 + (i % 2) * 200;
+                            y = 250;
+                        }
+
+                        if (mouseX > x && mouseX < x + 150 && mouseY > y && mouseY < y + 80) {
+                            userChoices.tomatoAnswer = tomatoOptions[i];
+                            break;
+                        }
+                    }
+
+                    if (userChoices.tomatoAnswer &&
+                        mouseX > width / 2 - 60 && mouseX < width / 2 + 60 &&
+                        mouseY > 500 && mouseY < 540) {
+                        gameState = FOOD_QUANTITY;
+                    }
+                    break;
+
+                case FOOD_QUANTITY:
+                    for (let i = 1; i <= 10; i++) {
+                        const x = width / 2 - 212.5 + ((i - 1) % 5) * 85;
+                        const y = 200 + Math.floor((i - 1) / 5) * 85;
+
+                        if (mouseX > x && mouseX < x + 70 && mouseY > y && mouseY < y + 70) {
+                            userChoices.foodQuantity = i;
+                            break;
+                        }
+                    }
+
+                    if (userChoices.foodQuantity > 0 &&
+                        mouseX > width / 2 - 60 && mouseX < width / 2 + 60 &&
+                        mouseY > 450 && mouseY < 490) {
+                        gameState = DONE_OPTIONS;
+                    }
+                    break;
+
+                case DONE_OPTIONS:
+                    // The Perfect Recipe button
+                    /*
+                    if (mouseX > width / 2 - 140 && mouseX < width / 2 - 20 &&
+                        mouseY > 320 && mouseY < 380) {
+                        generateRecipe();
+                        gameState = RECIPE_OUTPUT;
+                    }
+                    */
+                    // Your Day in Food button
+                    if (mouseX > width / 2 - 60 && mouseX < width / 2 + 60 &&
+                        mouseY > 320 && mouseY < 380) {
+                        gameState = DATA_VIZ_OUTPUT;
+                    }
+                    break;
+
+                case RECIPE_OUTPUT:
+                    // Your Day in Food button
+                    if (mouseX > width / 2 - 180 && mouseX < width / 2 - 80 &&
+                        mouseY > 480 && mouseY < 520) {
+                        gameState = DATA_VIZ_OUTPUT;
+                    }
+                    // Print button
+                    else if (mouseX > width / 2 - 50 && mouseX < width / 2 + 50 &&
+                        mouseY > 480 && mouseY < 520) {
+                        window.print();
+                    }
+                    // Reset button
+                    else if (mouseX > width / 2 - 60 && mouseX < width / 2 + 60 &&
+                        mouseY > 540 && mouseY < 580) {
+                        resetGame();
+                    }
+                    break;
+
+                case DATA_VIZ_OUTPUT:
+                    // The Perfect Recipe button
+                    if (mouseX > width / 2 - 180 && mouseX < width / 2 - 80 &&
+                        mouseY > 480 && mouseY < 520) {
+                        generateRecipe();
+                        gameState = RECIPE_OUTPUT;
+                    }
+                    // Print button
+                    else if (mouseX > width / 2 - 50 && mouseX < width / 2 + 50 &&
+                        mouseY > 480 && mouseY < 520) {
+                        window.print();
+                    }
+                    // Reset button
+                    else if (mouseX > width / 2 - 60 && mouseX < width / 2 + 60 &&
+                        mouseY > 540 && mouseY < 580) {
+                        resetGame();
+                    }
+
+                    break;
+            }
+        }
+
+        function generateRecipe() {
+            const key1 = userChoices.ingredients[0] + '-' + userChoices.ingredients[1];
+            const key2 = userChoices.ingredients[1] + '-' + userChoices.ingredients[0];
+
+            if (recipeDatabase[key1]) {
+                currentPoem = recipeDatabase[key1];
+            } else if (recipeDatabase[key2]) {
+                currentPoem = recipeDatabase[key2];
+            } else {
+                // Generate a fallback poem based on user choices and weather
+                const tempDesc = userChoices.weatherData.temperature > 25 ? 'cooling' :
+                    userChoices.weatherData.temperature < 15 ? 'warming' : 'refreshing';
+
+                currentPoem = `${userChoices.ingredients[0]} and ${userChoices.ingredients[1]} unite,\nA ${tempDesc} blend for ${userChoices.location}'s delight.\nPerfect for those who wake at ${userChoices.wakeTime},\nMixed with love in weather so fine!\n\nTemperature: ${userChoices.weatherData.temperature}°C\nClouds: ${userChoices.weatherData.cloudCover}%`;
+            }
+        }
+
+        function resetGame() {
+            userChoices = {
+                location: '',
+                wakeTime: '',
+                ingredients: [],
+                tomatoAnswer: '',
+                foodQuantity: 0,
+                weatherData: {}
+            };
+
+            weatherFetched = false;
+            currentPoem = '';
+            gameState = WELCOME;
+        }
+    </script>
+</body>
+</html>
